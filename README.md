@@ -15,6 +15,10 @@ Here are some ideas to get you started:
 - ⚡ Fun fact: ...
 -->
 
+Basic workflow:
+
+![workflow](resources/workflow.jpg)
+
 For inference, please check `main.ipynb` and `data` for example.
 
 For the calculation of Weight PER, please check `./utils/wper.py`, you can get similarity matrix there as well.
