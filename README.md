@@ -1,4 +1,4 @@
-## Hi there 👋
+## Dysfluent WFST: A Framework for Zero-Shot Speech Dysfluency Transcription and Detection 👋
 
 <!--
 **DysfluentWFST/DysfluentWFST** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
@@ -14,3 +14,7 @@ Here are some ideas to get you started:
 - 😄 Pronouns: ...
 - ⚡ Fun fact: ...
 -->
+
+For inference, please check `main.ipynb` and `data` for example.
+
+For the calculation of Weight PER, please check `./utils/wper.py`, you can get similarity matrix there as well.
