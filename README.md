@@ -17,7 +17,7 @@ Here are some ideas to get you started:
 
 Basic workflow:
 
-![workflow](resources/workflow.jpg)
+![workflow](resources/decoder-new.png)
 
 For inference, please check `main.ipynb` and `data` for example.
 
