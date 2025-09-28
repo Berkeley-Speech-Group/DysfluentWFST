@@ -340,15 +340,15 @@ class WFSTdecoder:
 
             raw_lattice = self._decode_lattice(lattice)
             raw_phns = [self.lexicon[i] for i in raw_lattice[0].aux_labels[:-1]]
-            raw_phns = self._deduplicate_and_filter(raw_phns)
-            state_seq = self.extract_phoneme_states(raw_phns)
+            clean_phns = self._deduplicate_and_filter(raw_phns)
+            state_seq = self.extract_phoneme_states(clean_phns)
             dys_info = self.detect_dysfluency(state_seq)
             results.append({
                 "id": sample_id,
                 "ref_phonemes": ref_phonemes,
                 "dys_detect":  dys_info,
                 "decode_phonemes": [item["phoneme"] for item in dys_info],
-                "lattice": raw_lattice
+                "lattice": raw_phns
             })
 
             del lattice
