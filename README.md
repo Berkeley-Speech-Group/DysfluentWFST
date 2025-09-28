@@ -24,3 +24,15 @@ Basic workflow:
 For inference, please check `main.ipynb` and `data` for example.
 
 For the calculation of Weight PER, please check `./utils/wper.py`, you can get similarity matrix there as well.
+
+## Set up the environment
+
+1. Install pytorch
+
+2. Install k2
+
+    Please follow the instruction [here](https://k2-fsa.github.io/k2/installation/index.html). 
+
+3. Install other dependencies (very few)
+
+4. Run the code.
