@@ -79,6 +79,7 @@ class WFSTdecoder:
         for i, phone in enumerate(phonemes):
             for j in range(len(phonemes)+1):
                 if i == j:
+                    lines.append(f"{i} {i} {phone} {0} {0}")
                     continue
                 if j == i+1:
                     lines.append(f"{i} {j} {phone} {phone} {alpha}")
