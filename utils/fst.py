@@ -7,21 +7,15 @@ import math
 import torch.nn.functional as F
 import time
 import numpy as np
+from .phn import PhonemeProcessor
 
 class WFSTdecoder:
-    def __init__(self, device: str, phoneme_lexicon: list, is_ipa=False):
+    def __init__(self, device: str, phoneme_lexicon: list, phn_type=False):
         self.device = torch.device(device)
         self.lexicon = phoneme_lexicon
-        self.is_ipa = is_ipa
+        self.phn_type = phn_type
         # read from npy file
-        self.similarity_matrix = np.load('utils/rule_sim_matrix.npy')
-        self.similarity_matrix = torch.from_numpy(self.similarity_matrix).to(self.device)
-        self.phn2idx = {
-        "|": 0, "OW": 1, "UW": 2, "EY": 3, "AW": 4, "AH": 5, "AO": 6, "AY": 7, "EH": 8, "K": 9,
-        "NG": 10, "F": 11, "JH": 12, "M": 13, "CH": 14, "IH": 15, "UH": 16, "HH": 17, "L": 18,
-        "AA": 19, "R": 20, "TH": 21, "AE": 22, "D": 23, "Z": 24, "OY": 25, "DH": 26, "IY": 27, "B": 28, "W": 29, "S": 30,
-        "T": 31, "SH": 32, "ZH": 33, "ER": 34, "V": 35, "Y": 36, "N": 37, "G": 38, "P": 39, "-": 40
-        }
+
                 
     def ctc_topo(self, num_phonemes: int):
         return k2.ctc_topo(max_token=num_phonemes, modified=False)
@@ -65,80 +59,9 @@ class WFSTdecoder:
         dense_fsa_vec = k2.DenseFsaVec(log_probs, supervision_segments)
         return dense_fsa_vec
     
-    # def create_emit_graph(self, probNT):
-    #     if probNT.ndim != 2:
-    #         raise ValueError(f"probNT must be a 2D tensor, but got {probNT.ndim}D tensor.")
-    #     lines = []
-    #     for i in range(probNT.shape[0]):
-    #         for j in range(probNT.shape[1]-1):
-    #             lines.append(f"{i} {i+1} {j} {probNT[i, j]}")
-    #     lines.append(f"{probNT.shape[0]} {probNT.shape[0]+1} {-1} {1}")
-    #     lines.append(f"{probNT.shape[0]+1}")
-    #     return '\n'.join(lines)
-    
-    def cmu2ipa(self, phoneme_seq, map='config/ipa2cmu.json'):
-        map_dict = json.load(open(map))
-        ipa_seq = []
-        flag = False
-        for phoneme in phoneme_seq:
-            if phoneme == '<unk>':
-                print(f"Phoneme {phoneme} not found in the CMU dictionary")
-                continue
-            flag = False
-            for k, v in  map_dict.items():
-                if phoneme in v:
-                    flag = True
-                    if ' ' in k:
-                        k = k.split()
-                        ipa_seq.extend(k)
-                        break
-                    ipa_seq.append(k)
-                    break
-            if not flag:
-                raise ValueError(f"Phoneme {phoneme} not found in the map")
-        return ipa_seq
-
-    # def ipa_to_cmu(self, ipa_list):
-    #     cmu_list = []
-    #     for ipa in ipa_list:
-    #         if ipa in ipa2cmu:
-    #             cmu_value = ipa2cmu[ipa].split()[0]
-    #             cmu_list.append(cmu_value)
-    #         else:
-    #             continue
-    #             # cmu_list.append(f"<UNK:{ipa}>")
-    #     return cmu_list
-    # { "a": "AA",
-    #   "b": "B",
-    #   "d": "D",
-    #   "e": "EY",...}
-    def ipa2cmu(self, phoneme, map='config/ipa2cmu.json'):
-        map_dict = json.load(open(map))
-        if phoneme in map_dict:
-            cmu_value = map_dict[phoneme].split()[0]
-            return cmu_value
-        else:
-            raise ValueError(f"Phoneme {phoneme} not found in the map")
-    
     def get_phoneme_sequence(self, ref_text):
-        phoneme_sequence = []
-        ref_text = ref_text.lower()
-        ref_text = ref_text.replace('.', '').replace(',', '').replace('?', '').replace('!', '')
-        for word in ref_text.split():
-            phonemes = cmudict.dict().get(word.lower(), ['<unk>'])[0]
-            if phonemes == '<unk>':
-                if word == 'quivers':
-                    phonemes = 'K W IH V ER S'.split()
-                else:
-                    print(f"Word {word} not found in the CMU dictionary")
-                    continue
-            phonemes = [phoneme.rstrip('012') for phoneme in phonemes]
-            phoneme_sequence.extend(phonemes)
-        if self.is_ipa:
-            ipa_sequence = self.cmu2ipa(phoneme_sequence)
-        else:
-            ipa_sequence = phoneme_sequence
-        return ipa_sequence
+        processor = PhonemeProcessor()
+        return processor.get_phoneme_sequence(ref_text, self.phn_type)
 
     def get_phoneme_id(self, phoneme):
         if phoneme == '|' or phoneme == '-' or phoneme == '<pad>' or phoneme == '<s>' or phoneme == '</s>' or phoneme == '<unk>' or phoneme == 'SIL' or phoneme == 'SPN':
@@ -149,6 +72,7 @@ class WFSTdecoder:
         return [self.get_phoneme_id(phoneme) for phoneme in phoneme_sequence]
     
     def create_fsa_graph(self, phonemes, beta, skip=False, back=True, sub=True):
+        phn_processor = PhonemeProcessor()
         alpha = 1 - 10**(-beta)
         error_score = (1-alpha)
         lines = []
@@ -167,30 +91,33 @@ class WFSTdecoder:
                     if sub:
                         # phoneme id 2 phoneme
                         phone_text = self.lexicon[phone]
-                        if self.is_ipa:
-                            phone_text = self.ipa2cmu(phone_text)
-                        phoneme_id_sim = self.phn2idx[phone_text]
+                        # if self.is_ipa:
+                        #     phone_text = self.ipa2cmu(phone_text)
+                        # phoneme_id_sim = self.phn2idx[phone_text]
                         # select top3 similar phonemes's id
-                        top3_sim_id = torch.topk(self.similarity_matrix[phoneme_id_sim], 2).indices
-                        # use self.phn2idx to get phoneme, remeber id is the value and we want key
-                        for sim_id in top3_sim_id:
-                            if sim_id == phoneme_id_sim:
-                                continue
-                            sim_phoneme = list(self.phn2idx.keys())[sim_id]
-                            # print(f"sim_phoneme: {sim_phoneme}")
-                            if sim_phoneme == '|' or sim_phoneme == '-' or sim_phoneme == '<pad>' or sim_phoneme == '<s>' or sim_phoneme == '</s>' or sim_phoneme == '<unk>' or sim_phoneme == 'SIL' or sim_phoneme == 'SPN':
-                                continue
-                            if self.is_ipa:
-                                sim_phoneme = self.cmu2ipa([sim_phoneme])[0]
-                            try:
-                                sim_phoneme_id = self.get_phoneme_id(sim_phoneme)
-                            except ValueError:
-                                print(f"Phoneme {sim_phoneme} not found in the lexicon")
-                                continue
-                            sub_token = '<trans>'.join([str(i), str(j)])
-                            self.lexicon.append(sub_token)
-                            sub_id = self.lexicon.index(sub_token)
-                            lines.append(f"{i} {j} {0} {sub_id} {error_score/10000}")
+                        sim_phonemes = phn_processor.get_similar_phonemes(phone_text, 3, self.phn_type)
+                        # create unique sim_tokens, eg: EH -> <sub>EH
+                        sim_tokens = ['<sub>' + sp for sp in sim_phonemes if sp != phone_text]
+                        for sim_token in sim_tokens:
+                            if sim_token not in self.lexicon:
+                                self.lexicon.append(sim_token)
+                        # get sim phoneme ids from sim_tokens
+                        sim_phoneme_ids = [self.lexicon.index(st) for st in sim_tokens]
+
+                        for sim_id in sim_phoneme_ids:
+                            # sim_phoneme = list(self.phn2idx.keys())[sim_id]
+                            # # print(f"sim_phoneme: {sim_phoneme}")
+                            # if self.is_ipa:
+                            #     sim_phoneme = self.cmu2ipa([sim_phoneme])[0]
+                            # try:
+                            #     sim_phoneme_id = self.get_phoneme_id(sim_phoneme)
+                            # except ValueError:
+                            #     print(f"Phoneme {sim_phoneme} not found in the lexicon")
+                            #     continue
+                            # sub_token = '<trans>'.join([str(i), str(j)])
+                            # self.lexicon.append(sub_token)
+                            # sub_id = self.lexicon.index(sub_token)
+                            lines.append(f"{i} {j} {phone} {sim_id} {error_score/10000}")
                 else:
                     if alpha == 1:
                         continue
@@ -260,45 +187,51 @@ class WFSTdecoder:
         for item in clean_states:
             start, end, phoneme = item
             # get the minimum time in state_history: [(1, 2, 'ɛ'), ...]
-            min_time = min(state_history) if state_history else -1
-            
+            min_time = min(state_history) if state_history else -1            
             if start in state_history:
                 dysfluency_results.append({
                     "phoneme": phoneme,
-                    "start_state": start,
-                    "end_state": end,
+                    # "start_state": start,
+                    # "end_state": end,
                     "dysfluency_type": "repetition"
                 })
             # Check for insertion (insertion occurs when start is earlier than any previous time)
             elif start < min_time:
                 dysfluency_results.append({
                     "phoneme": phoneme,
-                    "start_state": start,
-                    "end_state": end,
+                    # "start_state": start,
+                    # "end_state": end,
                     "dysfluency_type": "insertion"
                 })
             # Otherwise, it's a normal transition
             elif start > prev_end + 1:
                 dysfluency_results.append({
                     "phoneme": "<del>",
-                    "start_state": prev_end,
-                    "end_state": start,
+                    # "start_state": prev_end,
+                    # "end_state": start,
                     "dysfluency_type": "deletion"
                 })
                 dysfluency_results.append({
                     "phoneme": phoneme,
-                    "start_state": start,
-                    "end_state": end,
+                    # "start_state": start,
+                    # "end_state": end,
                     "dysfluency_type": "normal"
                 })
             else:
-                dysfluency_results.append({
-                    "phoneme": phoneme,
-                    "start_state": start,
-                    "end_state": end,
-                    "dysfluency_type": "normal"
-                })
-
+                if "<sub>" in phoneme:
+                    dysfluency_results.append({
+                        "phoneme": phoneme.replace("<sub>", ""),
+                        # "start_state": start,
+                        # "end_state": end,
+                        "dysfluency_type": "substitution"
+                    })
+                else:
+                    dysfluency_results.append({
+                        "phoneme": phoneme,
+                        # "start_state": start,
+                        # "end_state": end,
+                        "dysfluency_type": "normal"
+                    })
             state_history.add(start)
             prev_end = end
 
@@ -353,22 +286,23 @@ class WFSTdecoder:
 
         return lattice, phoneme_sequence
 
-    def _compute_loss(self, lattice):
-        loss = lattice.get_tot_scores(
-            log_semiring=True, use_double_scores=True
-        )
-        return -loss.mean()
+    # def _compute_loss(self, lattice):
+    #     loss = lattice.get_tot_scores(
+    #         log_semiring=True, use_double_scores=True
+    #     )
+    #     return -loss.mean()
 
     def _decode_lattice(self, lattice):
         """Return dysfluency annotations derived from the shortest path."""
         shortest = k2.shortest_path(lattice, use_double_scores=True)
-        phoneme_seq = [self.lexicon[i] for i in shortest[0].aux_labels[:-1]]
+        # phoneme_seq = [self.lexicon[i] for i in shortest[0].aux_labels[:-1]]
 
-        phoneme_seq = self._deduplicate_and_filter(phoneme_seq)
-        state_seq   = self.extract_phoneme_states(phoneme_seq)
-        return self.detect_dysfluency(state_seq)
+        # phoneme_seq = self._deduplicate_and_filter(phoneme_seq)
+        # state_seq   = self.extract_phoneme_states(phoneme_seq)
+        # return self.detect_dysfluency(state_seq)
+        return shortest
 
-    def decode(self, batch, beta, num_beam=2, back=True, skip=False, train=False):
+    def decode(self, batch, beta, num_beam=15, back=True, skip=False):
         """
         Decode a batch of sequences using the WFST decoder.
         Args:
@@ -404,19 +338,17 @@ class WFSTdecoder:
                 beta, back, skip, num_beam
             )
 
-            if train:
-                loss = self._compute_loss(lattice)
-                # Clean up GPU memory before returning
-                del lattice
-                torch.cuda.empty_cache()
-                return loss
-
-            dys_info = self._decode_lattice(lattice)
+            raw_lattice = self._decode_lattice(lattice)
+            raw_phns = [self.lexicon[i] for i in raw_lattice[0].aux_labels[:-1]]
+            raw_phns = self._deduplicate_and_filter(raw_phns)
+            state_seq = self.extract_phoneme_states(raw_phns)
+            dys_info = self.detect_dysfluency(state_seq)
             results.append({
                 "id": sample_id,
                 "ref_phonemes": ref_phonemes,
                 "dys_detect":  dys_info,
                 "decode_phonemes": [item["phoneme"] for item in dys_info],
+                "lattice": raw_lattice
             })
 
             del lattice
