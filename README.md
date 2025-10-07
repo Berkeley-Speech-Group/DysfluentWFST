@@ -27,12 +27,20 @@ For the calculation of Weight PER, please check `./utils/wper.py`, you can get s
 
 ## Set up the environment
 
-1. Install pytorch
+1. Install pytorch (based on your cuda and python version)
 
-2. Install k2
+2. Install k2 (based on your cuda and python version)
 
     Please follow the instruction [here](https://k2-fsa.github.io/k2/installation/index.html). 
 
-3. Install other dependencies (very few)
+3. Install other dependencies (very few, until you can run the main.ipynb)
 
 4. Run the code.
+
+## Use LCS-WFST
+
+1. git clone https://github.com/Berkeley-Speech-Group/Neural-LCS.git
+
+2. Follow the instruction in the repo to install the dependencies
+
+3. run WFST_LCS.ipynb
