@@ -15,7 +15,7 @@ Here are some ideas to get you started:
 - ⚡ Fun fact: ...
 -->
 
-Accepted by [Interspeech 2025](https://www.interspeech2025.org/home). [Paper](https://arxiv.org/abs/2505.16351) available.
+Accepted by [Interspeech 2025](https://www.interspeech2025.org/home). [Paper](https://www.isca-archive.org/interspeech_2025/guo25d_interspeech.pdf) available.
 
 Basic workflow:
 
@@ -37,10 +37,10 @@ For the calculation of Weight PER, please check `./utils/wper.py`, you can get s
 
 4. Run the code.
 
-## Use LCS-WFST
+<!-- ## Use LCS-WFST
 
 1. git clone https://github.com/Berkeley-Speech-Group/Neural-LCS.git
 
 2. Follow the instruction in the repo to install the dependencies
 
-3. run WFST_LCS.ipynb
+3. run WFST_LCS.ipynb -->
