@@ -1,13 +1,21 @@
 # Phoneme processing utilities
-import eng_to_ipa as ipa
+# import eng_to_ipa as ipa
 import cmudict
 import string
 import inflect
 import numpy as np
 import json
-import ipapy.ipastring
+# import ipapy.ipastring
 from typing import List, Union
 import os
+from g2p_en import G2p
+
+def remove_stress(phoneme: str) -> str:
+    import re
+    """
+    Remove stress from a phoneme.
+    """
+    return re.sub(r'\d', '', phoneme)
 
 
 class PhonemeProcessor:
@@ -16,32 +24,49 @@ class PhonemeProcessor:
     phoneme similarity computation, and conversion between IPA and CMU phoneme representations.
     """
     
-    def __init__(self, ipa2cmu_map_path: str = 'config/ipa2cmu.json', 
-                 sim_matrix_path: str = 'utils/rule_sim_matrix.npy'):
+    def __init__(self, ipa2cmu_map_path: str = '/home/chenxu/vscode_workspace/asr-llm-wfst/DysfluentWFST/config/ipa2cmu.json', 
+                 sim_matrix_path: str = '/home/chenxu/vscode_workspace/asr-llm-wfst/DysfluentWFST/utils/similarity.npy',
+                 metadata_path: str = '/home/chenxu/vscode_workspace/asr-llm-wfst/DysfluentWFST/utils/metadata.json'):
         """
         Initialize the PhonemeProcessor.
         
         Args:
             ipa2cmu_map_path: Path to the IPA to CMU mapping JSON file
             sim_matrix_path: Path to the phoneme similarity matrix numpy file
+            metadata_path: Path to the metadata JSON file containing phoneme labels
         """
         self.ipa2cmu_map_path = ipa2cmu_map_path
         self.sim_matrix_path = sim_matrix_path
+        self.metadata_path = metadata_path
         self.inflect_engine = inflect.engine()
-        
-        # CMU phoneme to index mapping
-        self.phn2idx = {
-            "|": 0, "OW": 1, "UW": 2, "EY": 3, "AW": 4, "AH": 5, "AO": 6, "AY": 7, "EH": 8, "K": 9,
-            "NG": 10, "F": 11, "JH": 12, "M": 13, "CH": 14, "IH": 15, "UH": 16, "HH": 17, "L": 18,
-            "AA": 19, "R": 20, "TH": 21, "AE": 22, "D": 23, "Z": 24, "OY": 25, "DH": 26, "IY": 27, 
-            "B": 28, "W": 29, "S": 30, "T": 31, "SH": 32, "ZH": 33, "ER": 34, "V": 35, "Y": 36, 
-            "N": 37, "G": 38, "P": 39, "-": 40
-        }
+        self.g2p = G2p()
         
         # Cache for loaded data
         self._ipa2cmu_map = None
         self._sim_matrix = None
         self._cmu_dict = None
+        self._metadata = None
+        self._phn2idx = None
+    
+    @property
+    def metadata(self):
+        """Lazy load metadata."""
+        if self._metadata is None:
+            if os.path.exists(self.metadata_path):
+                with open(self.metadata_path, 'r') as f:
+                    self._metadata = json.load(f)
+            else:
+                raise FileNotFoundError(f"Metadata file not found: {self.metadata_path}")
+        return self._metadata
+    
+    @property
+    def phn2idx(self):
+        """Lazy load phoneme to index mapping from metadata."""
+        if self._phn2idx is None:
+            phoneme_labels = self.metadata.get('phoneme_labels', [])
+            # Convert to uppercase to match CMU format
+            self._phn2idx = {phn.upper(): idx for idx, phn in enumerate(phoneme_labels)}
+        return self._phn2idx
     
     @property
     def ipa2cmu_map(self):
@@ -71,20 +96,20 @@ class PhonemeProcessor:
             self._cmu_dict = cmudict.dict()
         return self._cmu_dict
     
-    @staticmethod
-    def is_ipa(char: str) -> bool:
-        """
-        Check if a character is a valid IPA character.
+    # @staticmethod
+    # def is_ipa(char: str) -> bool:
+    #     """
+    #     Check if a character is a valid IPA character.
         
-        Args:
-            char: Single character to check
+    #     Args:
+    #         char: Single character to check
             
-        Returns:
-            True if character is valid IPA, False otherwise
-        """
-        if len(char) != 1:
-            raise ValueError("Input must be a single character.")
-        return ipapy.ipastring.is_valid_ipa(char)
+    #     Returns:
+    #         True if character is valid IPA, False otherwise
+    #     """
+    #     if len(char) != 1:
+    #         raise ValueError("Input must be a single character.")
+    #     return ipapy.ipastring.is_valid_ipa(char)
     
     def clean_text(self, text: str) -> str:
         """
@@ -128,6 +153,8 @@ class PhonemeProcessor:
         Returns:
             List of phonemes
         """
+        lexicon = json.load(open('/home/chenxu/vscode_workspace/asr-llm-wfst/DysfluentWFST/config/vocab.json', 'r'))
+        lexicon = [k.upper() for k, v in lexicon.items()]
         if phn_type not in ['ipa', 'cmu']:
             raise ValueError("Unsupported phoneme type. Use 'ipa' or 'cmu'.")
         
@@ -135,20 +162,21 @@ class PhonemeProcessor:
         text = self.clean_text(text)
         
         if phn_type == 'ipa':
-            phonemes = ipa.convert(text)
-            phonemes = phonemes.replace('ˈ', '')
-            phonemes = list(phonemes)
-            # Remove spaces
+            phonemes = self.g2p(text)
+            phonemes = [remove_stress(p) for p in phonemes]
             phonemes = [p for p in phonemes if p != ' ']
+            for phn in phonemes:
+                if phn not in lexicon:
+                    print(f"Phoneme {phn} not found in lexicon")
+            phonemes = self.cmu2ipa(phonemes)
+            # Remove spaces
+            
+            
         elif phn_type == 'cmu':
-            words = text.split()
-            phonemes = []
-            for word in words:
-                if word in self.cmu_dict:
-                    phonemes += self.cmu_dict[word][0]  # take the first pronunciation
-                else:
-                    phonemes += list(word)  # fallback to spelling if not found
-        
+            phonemes = self.g2p(text)
+            phonemes = [remove_stress(p) for p in phonemes]
+            # Remove spaces
+            phonemes = [p for p in phonemes if p != ' ' and p in lexicon]
         return phonemes
     
     def _get_sim_phoneme_cmu(self, phn: str, num: int) -> List[str]:
@@ -156,21 +184,29 @@ class PhonemeProcessor:
         Get similar CMU phonemes based on similarity matrix.
         
         Args:
-            phn: CMU phoneme
+            phn: CMU phoneme (uppercase)
             num: Number of similar phonemes to return
             
         Returns:
             List of similar phonemes
         """
+        # Convert to uppercase to match the phoneme mapping
+        phn = phn.upper()
+        
         if phn not in self.phn2idx:
             raise ValueError(f"Phoneme '{phn}' not found in phoneme list, please use CMU phonemes.")
         
-        # Return the top num similar phonemes
+        # Return the top num similar phonemes based on similarity matrix
         phn_idx = self.phn2idx[phn]
-        sim_indices = np.argsort(-self.sim_matrix[phn_idx])[:num+1]  # +1 to include itself
-        sim_phns = [list(self.phn2idx.keys())[i] for i in sim_indices if i != phn_idx]
-        sim_phns = [phn for phn in sim_phns if phn != '-' and phn != '|']  # Exclude silence phoneme
-        return sim_phns
+        # Sort by similarity (descending order) and get top num+1 (including itself)
+        sim_indices = np.argsort(-self.sim_matrix[phn_idx])[:num+1]
+        
+        # Get phoneme names from indices, excluding the input phoneme itself
+        idx2phn = {idx: phn for phn, idx in self.phn2idx.items()}
+        sim_phns = [idx2phn[i] for i in sim_indices if i != phn_idx]
+        
+        # Return only the requested number of similar phonemes
+        return sim_phns[:num]
     
     def ipa2cmu(self, phoneme: str) -> str:
         """
@@ -242,9 +278,9 @@ class PhonemeProcessor:
 
 
 # Legacy function wrappers for backward compatibility
-def is_ipa(char: str) -> bool:
-    """Legacy wrapper for PhonemeProcessor.is_ipa()"""
-    return PhonemeProcessor.is_ipa(char)
+# def is_ipa(char: str) -> bool:
+#     """Legacy wrapper for PhonemeProcessor.is_ipa()"""
+#     return PhonemeProcessor.is_ipa(char)
 
 def text_cleaner(text: str) -> str:
     """Legacy wrapper for PhonemeProcessor.clean_text()"""
@@ -279,6 +315,6 @@ def get_sim_phoneme(phn: str, num: int, phn_type: str) -> List[str]:
 if __name__ == "__main__":
     # Example usage of the PhonemeProcessor class
     processor = PhonemeProcessor()
-    # ['clean_text', 'cmu2ipa', 'get_phoneme_sequence', 'get_similar_phonemes', 'ipa2cmu', 'is_ipa']
+    # ['clean_text', 'cmu2ipa', 'get_phoneme_sequence', 'get_similar_phonemes', 'ipa2cmu']
     # print all the public methods of the class
     print([method for method in dir(processor) if callable(getattr(processor, method)) and not method.startswith("_")])

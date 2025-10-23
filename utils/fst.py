@@ -64,7 +64,7 @@ class WFSTdecoder:
         return processor.get_phoneme_sequence(ref_text, self.phn_type)
 
     def get_phoneme_id(self, phoneme):
-        if phoneme == '|' or phoneme == '-' or phoneme == '<pad>' or phoneme == '<s>' or phoneme == '</s>' or phoneme == '<unk>' or phoneme == 'SIL' or phoneme == 'SPN':
+        if phoneme == '|' or phoneme == '-' or phoneme == '<pad>' or phoneme == '<s>' or phoneme == '</s>' or phoneme == '<unk>' or phoneme == 'SIL' or phoneme == 'SPN' or phoneme == '<BLK>':
             return 0
         return self.lexicon.index(phoneme)
     
@@ -72,9 +72,10 @@ class WFSTdecoder:
         return [self.get_phoneme_id(phoneme) for phoneme in phoneme_sequence]
     
     def create_fsa_graph(self, phonemes, beta, skip=False, back=True, sub=True):
+        # blk_id = self.blank_token_id()
         phn_processor = PhonemeProcessor()
-        alpha = 1 - 10**(-beta)
-        error_score = (1-alpha)
+        alpha = 0
+        error_score = -1
         lines = []
         for i, phone in enumerate(phonemes):
             for j in range(len(phonemes)+1):
@@ -104,6 +105,10 @@ class WFSTdecoder:
                                 self.lexicon.append(sim_token)
                         # get sim phoneme ids from sim_tokens
                         sim_phoneme_ids = [self.lexicon.index(st) for st in sim_tokens]
+                        if phone_text == 'T':
+                            lines.append(f"{i} {j} {phone} {0} {0}")
+                        else:
+                            lines.append(f"{i} {j} {phone} {0} {beta}")
 
                         for sim_id in sim_phoneme_ids:
                             # sim_phoneme = list(self.phn2idx.keys())[sim_id]
@@ -118,7 +123,7 @@ class WFSTdecoder:
                             # sub_token = '<trans>'.join([str(i), str(j)])
                             # self.lexicon.append(sub_token)
                             # sub_id = self.lexicon.index(sub_token)
-                            lines.append(f"{i} {j} {phone} {sim_id} {error_score/10000}")
+                            lines.append(f"{i} {j} {phone} {sim_id} {error_score}")
                 else:
                     if alpha == 1:
                         continue
@@ -131,12 +136,12 @@ class WFSTdecoder:
                         lines.append(f"{i} {j} {0} {mis_id} {error_score * math.exp(-(i-j)**2/2)}")
                         continue
                     if j < i and back:
-                        if i - j > 2:
+                        if i - j > 1:
                             continue
                         rep_token = '<trans>'.join([str(i), str(j)])
                         self.lexicon.append(rep_token)
                         rep_id = self.lexicon.index(rep_token)
-                        lines.append(f"{i} {j} {0} {rep_id} {error_score * math.exp(-(i-j)**2/2)}")
+                        lines.append(f"{i} {j} {0} {rep_id} {error_score}")
                         continue
                     
         lines.append(f"{len(phonemes)} {len(phonemes)+1} {-1} {-1} {0}")
@@ -186,7 +191,17 @@ class WFSTdecoder:
 
         # Detect dysfluency
         for item in clean_states:
-            start, end, phoneme = item
+            start, end, phoneme_raw = item
+            # Normalize substitution tokens: strip the "<sub>" prefix early so the
+            # subsequent logic is agnostic to its presence. We keep a flag to mark
+            # that this phoneme is a substitution so we can set the correct
+            # dysfluency_type later no matter which branch we hit.
+            is_sub = False
+            if isinstance(phoneme_raw, str) and phoneme_raw.startswith("<sub>"):
+                is_sub = True
+                phoneme = phoneme_raw.replace("<sub>", "")
+            else:
+                phoneme = phoneme_raw
             # get the minimum time in state_history: [(1, 2, 'ɛ'), ...]
             min_time = min(state_history) if state_history else -1            
             if start in state_history:
@@ -194,7 +209,7 @@ class WFSTdecoder:
                     "phoneme": phoneme,
                     # "start_state": start,
                     # "end_state": end,
-                    "dysfluency_type": "repetition"
+                    "dysfluency_type": "substitution" if is_sub else "repetition"
                 })
             # Check for insertion (insertion occurs when start is earlier than any previous time)
             elif start < min_time:
@@ -202,7 +217,7 @@ class WFSTdecoder:
                     "phoneme": phoneme,
                     # "start_state": start,
                     # "end_state": end,
-                    "dysfluency_type": "insertion"
+                    "dysfluency_type": "substitution" if is_sub else "insertion"
                 })
             # Otherwise, it's a normal transition
             elif start > prev_end + 1:
@@ -216,23 +231,15 @@ class WFSTdecoder:
                     "phoneme": phoneme,
                     # "start_state": start,
                     # "end_state": end,
-                    "dysfluency_type": "normal"
+                    "dysfluency_type": "substitution" if is_sub else "normal"
                 })
             else:
-                if "<sub>" in phoneme:
-                    dysfluency_results.append({
-                        "phoneme": phoneme.replace("<sub>", ""),
-                        # "start_state": start,
-                        # "end_state": end,
-                        "dysfluency_type": "substitution"
-                    })
-                else:
-                    dysfluency_results.append({
-                        "phoneme": phoneme,
-                        # "start_state": start,
-                        # "end_state": end,
-                        "dysfluency_type": "normal"
-                    })
+                dysfluency_results.append({
+                    "phoneme": phoneme,
+                    # "start_state": start,
+                    # "end_state": end,
+                    "dysfluency_type": "substitution" if is_sub else "normal"
+                })
             state_history.add(start)
             prev_end = end
 
@@ -243,7 +250,7 @@ class WFSTdecoder:
         filtered_list = []
         prev_label = None
         for phoneme in phoneme_list:
-            if phoneme != prev_label and phoneme not in ['|', '-', "<pad>", "<s>", "</s>", "<unk>", 'STL', 'SPN', '<blank>', '<b>']:
+            if phoneme != prev_label and phoneme not in ['|', '-', "<pad>", "<s>", "</s>", "<unk>", 'STL', 'SPN', '<blank>', '<b>', '<BLK>']:
                 filtered_list.append(phoneme)
             prev_label = phoneme
         return filtered_list
@@ -251,7 +258,7 @@ class WFSTdecoder:
     
 
     def _build_lattice(self, emission, length, ref_text,
-                       beta, back, skip, num_beam):
+                       beta, back, skip, num_beam, sub=True):
         """Create the k2 lattice for one utterance and return it together
         with the reference phoneme sequence."""
         emission = emission.to(self.device)
@@ -266,7 +273,7 @@ class WFSTdecoder:
         phoneme_sequence = self.get_phoneme_sequence(ref_text)
         phoneme_ids = self.get_phoneme_ids(phoneme_sequence)
         ref_fsa_str = self.create_fsa_graph(
-            phoneme_ids, beta=beta, skip=skip, back=back
+            phoneme_ids, beta=beta, skip=skip, back=back, sub=sub
         )
         ref_fsa = k2.Fsa.from_str(ref_fsa_str, acceptor=False)
         ref_fsa = k2.arc_sort(ref_fsa).to(self.device)
@@ -303,7 +310,7 @@ class WFSTdecoder:
         # return self.detect_dysfluency(state_seq)
         return shortest
 
-    def decode(self, batch, beta, num_beam=15, back=True, skip=False):
+    def decode(self, batch, beta, num_beam=15, back=True, skip=False, sub=True):
         """
         Decode a batch of sequences using the WFST decoder.
         Args:
@@ -336,7 +343,7 @@ class WFSTdecoder:
 
             lattice, ref_phonemes = self._build_lattice(
                 emission, lengths[idx], ref_text,
-                beta, back, skip, num_beam
+                beta, back, skip, num_beam, sub
             )
 
             raw_lattice = self._decode_lattice(lattice)
@@ -356,4 +363,3 @@ class WFSTdecoder:
             torch.cuda.empty_cache()
 
         return results
-
